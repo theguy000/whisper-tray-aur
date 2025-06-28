@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 import gi
 gi.require_version('AppIndicator3', '0.1')
-from gi.repository import AppIndicator3
 gi.require_version('Gtk', '3.0')
-# --- Import GLib for the modern idle_add ---
-from gi.repository import Gtk, GObject, GLib
+gi.require_version('Notify', '0.7')
+
+from gi.repository import AppIndicator3, Gtk, GLib, Notify
 from pynput.keyboard import GlobalHotKeys
 import json
 import sounddevice as sd
@@ -15,23 +15,19 @@ import threading
 import os
 import tempfile
 import pyperclip
-from notifypy import Notify
 import urllib.request
 
-# --- CONFIGURATION ---
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 USER_HOME = os.path.expanduser("~")
 CONFIG_FILE = os.path.join(USER_HOME, ".config", "whisper-tray", "config.json")
 ICON_DIR = SCRIPT_DIR
 
-# --- Icon paths ---
 ICONS = {
     "idle": os.path.join(ICON_DIR, "icon-idle.svg"),
     "recording": os.path.join(ICON_DIR, "icon-recording.svg"),
     "processing": os.path.join(ICON_DIR, "icon-processing.svg"),
 }
 
-# --- Whisper.cpp Models ---
 MODELS = {
     "tiny.en": {"url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin", "disk": "75 MiB"},
     "base.en": {"url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin", "disk": "142 MiB"},
@@ -45,7 +41,7 @@ def load_config():
     os.makedirs(default_config_dir, exist_ok=True)
     os.makedirs(default_model_dir, exist_ok=True)
     default_config = {
-        "executable": "whisper-cli",
+        "executable": os.path.join(SCRIPT_DIR, "whisper-tray-cli"),
         "model_path": os.path.join(default_model_dir, "ggml-base.en.bin"),
         "model_dir": default_model_dir,
         "hotkey": "<ctrl>+<alt>+h"
@@ -139,10 +135,8 @@ class SettingsWindow(Gtk.Window):
         vbox.pack_start(hbox_buttons, False, False, 0)
 
     def _create_setting_row(self, label_text, widget):
-        box = Gtk.Box(spacing=6)
-        label = Gtk.Label(label=label_text, xalign=0)
-        box.pack_start(label, False, False, 0)
-        box.pack_start(widget, True, True, 0)
+        box = Gtk.Box(spacing=6); label = Gtk.Label(label=label_text, xalign=0)
+        box.pack_start(label, False, False, 0); box.pack_start(widget, True, True, 0)
         return box
 
     def populate_models(self):
@@ -176,6 +170,7 @@ class TrayApp:
         self.thread = None; self.settings_win = None; self.hotkey_listener = None
         self.indicator = AppIndicator3.Indicator.new("whisper-tray", ICONS["idle"], AppIndicator3.IndicatorCategory.APPLICATION_STATUS)
         self.indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
+        Notify.init("Whisper Tray")
         self.menu = self._build_menu(); self.indicator.set_menu(self.menu)
         self._setup_hotkey(); self._change_state("idle")
 
@@ -186,8 +181,10 @@ class TrayApp:
         quit_item = Gtk.MenuItem.new_with_label("Quit"); quit_item.connect("activate", self.quit_app); menu.append(quit_item)
         menu.show_all(); return menu
 
-    def _send_notification(self, title, message):
-        notification = Notify(); notification.title = title; notification.message = message; notification.send()
+    def _send_notification(self, title, message, icon_name="whisper-tray"):
+        """Helper to send a desktop notification using libnotify."""
+        notification = Notify.Notification.new(title, message, icon_name)
+        notification.show()
         print(f"[{title}] {message}")
 
     def _change_state(self, new_state):
@@ -213,9 +210,9 @@ class TrayApp:
         try:
             self.hotkey_listener = GlobalHotKeys({hotkey_str: lambda: GLib.idle_add(self.toggle_recording)})
             self.hotkey_listener.start()
-        except Exception as e:
+        except Exception:
             msg = "The Super/Meta key is often reserved by the OS. Try a Ctrl/Alt combo." if "<super>" in hotkey_str else "In use by another app?"
-            self._send_notification("Hotkey Error", f"Could not register '{hotkey_str}'. {msg}")
+            self._send_notification("Hotkey Error", f"Could not register '{hotkey_str}'. {msg}", "dialog-warning")
 
     def toggle_recording(self, *args):
         if self.state == "idle": self.start_recording()
@@ -231,8 +228,8 @@ class TrayApp:
                 while self.state == "recording":
                     data, _ = stream.read(self.samplerate // 10)
                     if self.state == "recording": self.audio_frames.append(data)
-        except Exception:
-            self._send_notification("Audio Error", "Could not open microphone. Check device permissions.")
+        except Exception as e:
+            self._send_notification("Audio Error", f"Could not open microphone: {e}", "dialog-error")
             GLib.idle_add(self._change_state, "idle")
 
     def stop_recording_and_transcribe(self):
@@ -243,7 +240,7 @@ class TrayApp:
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             self.temp_wav_path = tmp.name
             write(self.temp_wav_path, self.samplerate, np.concatenate(self.audio_frames, axis=0))
-        self._send_notification("Whisper", "Transcribing audio...")
+        self._send_notification("Whisper", "Transcribing audio...", ICONS["processing"])
         threading.Thread(target=self._transcribe_thread, daemon=True).start()
 
     def _transcribe_thread(self):
@@ -255,20 +252,21 @@ class TrayApp:
             pyperclip.copy(result.stdout.strip())
             self._send_notification("Transcription Complete", "Text copied to clipboard.")
         except FileNotFoundError:
-            self._send_notification("Error", f"Executable '{self.config.get('executable')}' not found or model missing.")
+            self._send_notification("Error", f"Executable '{self.config.get('executable')}' not found or model missing.", "dialog-error")
             GLib.idle_add(lambda: DownloadModelWindow(self).show_all())
         except subprocess.CalledProcessError as e:
             msg = e.stderr.strip()
-            self._send_notification("Transcription Error", msg)
+            self._send_notification("Transcription Error", msg, "dialog-error")
             if "failed to load model" in msg: GLib.idle_add(lambda: DownloadModelWindow(self).show_all())
         except Exception as e:
-            self._send_notification("Unexpected Error", str(e))
+            self._send_notification("Unexpected Error", str(e), "dialog-error")
         finally:
             if hasattr(self, 'temp_wav_path') and os.path.exists(self.temp_wav_path): os.remove(self.temp_wav_path)
             GLib.idle_add(self._change_state, "idle")
 
     def quit_app(self, *args):
         if self.hotkey_listener: self.hotkey_listener.stop()
+        Notify.uninit()
         Gtk.main_quit()
 
 if __name__ == "__main__":
