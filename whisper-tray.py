@@ -14,7 +14,6 @@ import subprocess
 import threading
 import os
 import tempfile
-import pyperclip
 import urllib.request
 import logging
 import sys
@@ -264,7 +263,8 @@ class TrayApp:
             executable = self.config.get("executable", "whisper-cli")
             cmd = [executable, "-m", model_path, "-f", self.temp_wav_path, "-nt", "-otxt"]
             result = subprocess.run(cmd, capture_output=True, text=True, check=True, encoding='utf-8')
-            pyperclip.copy(result.stdout.strip())
+            text_to_copy = result.stdout.strip()
+            subprocess.run(['xclip', '-selection', 'clipboard'], input=text_to_copy, text=True, check=True)
             self._send_notification("Transcription Complete", "Text copied to clipboard.")
         except FileNotFoundError:
             self._send_notification("Error", f"Executable '{self.config.get('executable')}' not found or model missing.", "dialog-error")
