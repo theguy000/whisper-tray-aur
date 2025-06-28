@@ -4,7 +4,7 @@ gi.require_version('AppIndicator3', '0.1')
 gi.require_version('Gtk', '3.0')
 gi.require_version('Notify', '0.7')
 
-from gi.repository import AppIndicator3, Gtk, GLib, Notify
+from gi.repository import AppIndicator3 as appindicator, Gtk as gtk, GLib, Notify, GObject
 from pynput.keyboard import GlobalHotKeys
 import json
 import sounddevice as sd
@@ -71,27 +71,27 @@ def save_config(config):
     os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
     with open(CONFIG_FILE, 'w') as f: json.dump(config, f, indent=4)
 
-class DownloadModelWindow(Gtk.Window):
+class DownloadModelWindow(gtk.Window):
     def __init__(self, parent):
         if isinstance(parent, SettingsWindow): self.parent_app = parent.parent
         else: self.parent_app = parent
         super().__init__(title="Download Model", modal=True, transient_for=self.parent_app.settings_win)
-        self.set_border_width(10); self.set_position(Gtk.WindowPosition.CENTER)
-        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6); self.add(vbox)
-        vbox.pack_start(Gtk.Label(label="Model not found or failed to load."), False, False, 0)
-        vbox.pack_start(Gtk.Label(label="Please select a model to download:"), False, False, 0)
-        self.model_combo = Gtk.ComboBoxText(); vbox.pack_start(self.model_combo, False, False, 5)
-        self.progress_bar = Gtk.ProgressBar(); vbox.pack_start(self.progress_bar, False, False, 5)
-        hbox_buttons = Gtk.Box(spacing=6)
-        self.download_button = Gtk.Button(label="Download"); self.download_button.connect("clicked", self.on_download_clicked)
-        self.cancel_button = Gtk.Button(label="Cancel"); self.cancel_button.connect("clicked", lambda w: self.destroy())
+        self.set_border_width(10); self.set_position(gtk.WindowPosition.CENTER)
+        vbox = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=6); self.add(vbox)
+        vbox.pack_start(gtk.Label(label="Model not found or failed to load."), False, False, 0)
+        vbox.pack_start(gtk.Label(label="Please select a model to download:"), False, False, 0)
+        self.model_combo = gtk.ComboBoxText(); vbox.pack_start(self.model_combo, False, False, 5)
+        self.progress_bar = gtk.ProgressBar(); vbox.pack_start(self.progress_bar, False, False, 5)
+        hbox_buttons = gtk.Box(spacing=6)
+        self.download_button = gtk.Button(label="Download"); self.download_button.connect("clicked", self.on_download_clicked)
+        self.cancel_button = gtk.Button(label="Cancel"); self.cancel_button.connect("clicked", lambda w: self.destroy())
         hbox_buttons.pack_start(self.download_button, True, True, 0); hbox_buttons.pack_start(self.cancel_button, True, True, 0)
         vbox.pack_start(hbox_buttons, False, False, 0)
         model_dir = self.parent_app.config["model_dir"]
         downloaded_models = [f for f in os.listdir(model_dir) if f.endswith(".bin")] if os.path.exists(model_dir) else []
         available_models = {name: data for name, data in MODELS.items() if f"ggml-{name}.bin" not in downloaded_models}
         if not available_models:
-            vbox.pack_start(Gtk.Label(label="All models already downloaded!"), False, False, 0); self.download_button.set_sensitive(False)
+            vbox.pack_start(gtk.Label(label="All models already downloaded!"), False, False, 0); self.download_button.set_sensitive(False)
         else:
             for name, data in available_models.items(): self.model_combo.append_text(f"{name} [Disk: {data['disk']}]")
             self.model_combo.set_active(0)
@@ -125,32 +125,32 @@ class DownloadModelWindow(Gtk.Window):
     def on_download_failed(self, error_msg):
         self.progress_bar.set_text(f"Error: {error_msg}"); self.cancel_button.set_sensitive(True)
 
-class SettingsWindow(Gtk.Window):
+class SettingsWindow(gtk.Window):
     def __init__(self, parent):
         super().__init__(title="Settings")
         self.parent = parent
-        self.set_border_width(10); self.set_modal(True); self.set_position(Gtk.WindowPosition.CENTER)
-        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10); self.add(vbox)
-        self.exec_entry = Gtk.Entry(text=self.parent.config.get("executable", "whisper-cli"))
+        self.set_border_width(10); self.set_modal(True); self.set_position(gtk.WindowPosition.CENTER)
+        vbox = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=10); self.add(vbox)
+        self.exec_entry = gtk.Entry(text=self.parent.config.get("executable", "whisper-cli"))
         vbox.pack_start(self._create_setting_row("Executable Name:", self.exec_entry), False, False, 0)
-        self.dir_entry = Gtk.Entry(text=self.parent.config.get("model_dir"))
+        self.dir_entry = gtk.Entry(text=self.parent.config.get("model_dir"))
         self.dir_entry.connect("changed", lambda w: self.populate_models())
         vbox.pack_start(self._create_setting_row("Model Directory:", self.dir_entry), False, False, 0)
-        self.model_combo = Gtk.ComboBoxText(entry_text_column=0)
-        download_button = Gtk.Button(label="Download..."); download_button.connect("clicked", lambda w: DownloadModelWindow(self).show_all())
-        model_box = Gtk.Box(spacing=6); model_box.pack_start(self.model_combo, True, True, 0); model_box.pack_start(download_button, False, False, 0)
+        self.model_combo = gtk.ComboBoxText(entry_text_column=0)
+        download_button = gtk.Button(label="Download..."); download_button.connect("clicked", lambda w: DownloadModelWindow(self).show_all())
+        model_box = gtk.Box(spacing=6); model_box.pack_start(self.model_combo, True, True, 0); model_box.pack_start(download_button, False, False, 0)
         vbox.pack_start(self._create_setting_row("Whisper Model:", model_box), False, False, 0)
         self.populate_models()
         if self.parent.config.get("model_path") and os.path.exists(self.parent.config["model_path"]):
             self.model_combo.set_active_id(self.parent.config["model_path"])
-        self.hotkey_entry = Gtk.Entry(text=self.parent.config.get("hotkey", "<ctrl>+<alt>+h"))
+        self.hotkey_entry = gtk.Entry(text=self.parent.config.get("hotkey", "<ctrl>+<alt>+h"))
         vbox.pack_start(self._create_setting_row("Hotkey:", self.hotkey_entry), False, False, 0)
-        save_button = Gtk.Button(label="Save and Close"); save_button.connect("clicked", self.on_save_clicked)
-        hbox_buttons = Gtk.Box(spacing=6, margin_top=10); hbox_buttons.pack_end(save_button, False, False, 0)
+        save_button = gtk.Button(label="Save and Close"); save_button.connect("clicked", self.on_save_clicked)
+        hbox_buttons = gtk.Box(spacing=6, margin_top=10); hbox_buttons.pack_end(save_button, False, False, 0)
         vbox.pack_start(hbox_buttons, False, False, 0)
 
     def _create_setting_row(self, label_text, widget):
-        box = Gtk.Box(spacing=6); label = Gtk.Label(label=label_text, xalign=0)
+        box = gtk.Box(spacing=6); label = gtk.Label(label=label_text, xalign=0)
         box.pack_start(label, False, False, 0); box.pack_start(widget, True, True, 0)
         return box
 
@@ -183,17 +183,17 @@ class TrayApp:
     def __init__(self):
         self.config = load_config(); self.audio_frames = []; self.samplerate = 16000
         self.thread = None; self.settings_win = None; self.hotkey_listener = None
-        self.indicator = AppIndicator3.Indicator.new("whisper-tray", ICONS["idle"], AppIndicator3.IndicatorCategory.APPLICATION_STATUS)
-        self.indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
+        self.indicator = appindicator.Indicator.new("whisper-tray", ICONS["idle"], appindicator.IndicatorCategory.APPLICATION_STATUS)
+        self.indicator.set_status(appindicator.IndicatorStatus.ACTIVE)
         Notify.init("Whisper Tray")
         self.menu = self._build_menu(); self.indicator.set_menu(self.menu)
         self._setup_hotkey(); self._change_state("idle")
 
     def _build_menu(self):
-        menu = Gtk.Menu()
-        self.record_item = Gtk.MenuItem.new_with_label("Record"); self.record_item.connect("activate", self.toggle_recording); menu.append(self.record_item)
-        settings_item = Gtk.MenuItem.new_with_label("Settings"); settings_item.connect("activate", self.open_settings); menu.append(settings_item)
-        quit_item = Gtk.MenuItem.new_with_label("Quit"); quit_item.connect("activate", self.quit_app); menu.append(quit_item)
+        menu = gtk.Menu()
+        self.record_item = gtk.MenuItem.new_with_label("Record"); self.record_item.connect("activate", self.toggle_recording); menu.append(self.record_item)
+        settings_item = gtk.MenuItem.new_with_label("Settings"); settings_item.connect("activate", self.open_settings); menu.append(settings_item)
+        quit_item = gtk.MenuItem.new_with_label("Quit"); quit_item.connect("activate", self.quit_app); menu.append(quit_item)
         menu.show_all(); return menu
 
     def _send_notification(self, title, message, icon_name="whisper-tray"):
@@ -282,22 +282,22 @@ class TrayApp:
     def quit_app(self, *args):
         if self.hotkey_listener: self.hotkey_listener.stop()
         Notify.uninit()
-        Gtk.main_quit()
+        gtk.main_quit()
 
 if __name__ == "__main__":
     logging.info("Application starting up...")
     try:
         app = TrayApp()
-        Gtk.main()
+        gtk.main()
     except Exception as e:
         logging.error("Critical error during application startup: %s", e, exc_info=True)
         # Fallback to show a GTK error dialog if possible
         try:
-            dialog = Gtk.MessageDialog(
+            dialog = gtk.MessageDialog(
                 transient_for=None,
                 flags=0,
-                message_type=Gtk.MessageType.ERROR,
-                buttons=Gtk.ButtonsType.OK,
+                message_type=gtk.MessageType.ERROR,
+                buttons=gtk.ButtonsType.OK,
                 text="Whisper Tray Startup Error"
             )
             dialog.format_secondary_text(
