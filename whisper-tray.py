@@ -20,7 +20,11 @@ import urllib.request
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 USER_HOME = os.path.expanduser("~")
 CONFIG_FILE = os.path.join(USER_HOME, ".config", "whisper-tray", "config.json")
-ICON_DIR = SCRIPT_DIR
+# Search for icons in the installed path, otherwise use local
+if os.path.exists("/usr/share/whisper-tray/icons"):
+    ICON_DIR = "/usr/share/whisper-tray/icons"
+else:
+    ICON_DIR = SCRIPT_DIR
 
 ICONS = {
     "idle": os.path.join(ICON_DIR, "icon-idle.svg"),
