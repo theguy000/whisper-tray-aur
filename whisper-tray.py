@@ -16,10 +16,21 @@ import os
 import tempfile
 import pyperclip
 import urllib.request
+import logging
+import sys
 
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 USER_HOME = os.path.expanduser("~")
 CONFIG_FILE = os.path.join(USER_HOME, ".config", "whisper-tray", "config.json")
+
+LOG_FILE = os.path.join(os.path.dirname(CONFIG_FILE), "whisper-tray.log")
+os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+logging.basicConfig(
+    filename=LOG_FILE,
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
 # Search for icons in the installed path, otherwise use local
 if os.path.exists("/usr/share/whisper-tray/icons"):
     ICON_DIR = "/usr/share/whisper-tray/icons"
@@ -274,5 +285,26 @@ class TrayApp:
         Gtk.main_quit()
 
 if __name__ == "__main__":
-    app = TrayApp()
-    Gtk.main()
+    logging.info("Application starting up...")
+    try:
+        app = TrayApp()
+        Gtk.main()
+    except Exception as e:
+        logging.error("Critical error during application startup: %s", e, exc_info=True)
+        # Fallback to show a GTK error dialog if possible
+        try:
+            dialog = Gtk.MessageDialog(
+                transient_for=None,
+                flags=0,
+                message_type=Gtk.MessageType.ERROR,
+                buttons=Gtk.ButtonsType.OK,
+                text="Whisper Tray Startup Error"
+            )
+            dialog.format_secondary_text(
+                f"A critical error occurred. Please see the log file for details:\n{LOG_FILE}"
+            )
+            dialog.run()
+            dialog.destroy()
+        except Exception as dialog_e:
+            logging.error("Failed to show GTK error dialog: %s", dialog_e, exc_info=True)
+        sys.exit(1)
