@@ -1,0 +1,27 @@
+pkgbase = whisper-tray-git
+	pkgdesc = A system tray applet with a bundled whisper.cpp to transcribe audio.
+	pkgver = 1.0
+	pkgrel = 1
+	url = https://github.com/theguy000/whisper-tray-aur
+	arch = x86_64
+	arch = aarch64
+	license = MIT
+	makedepends = cmake
+	makedepends = git
+	makedepends = vulkan-headers
+	depends = python-gobject
+	depends = python-sounddevice
+	depends = python-numpy
+	depends = python-scipy
+	depends = python-pyperclip
+	depends = python-notifypy
+	depends = python-pynput
+	depends = libappindicator-gtk3
+	depends = vulkan-icd-loader
+	depends = xclip
+	source = whisper-tray-aur::git+https://github.com/theguy000/whisper-tray-aur.git
+	source = whisper.cpp-1.6.0.tar.gz::https://github.com/ggerganov/whisper.cpp/archive/refs/tags/v1.6.0.tar.gz
+	sha256sums = SKIP
+	sha256sums = 69b92a2a0962970731a55b63212870599a374636f237435f3089d36154562c23
+
+pkgname = whisper-tray-git
