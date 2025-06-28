@@ -1,0 +1,6 @@
+{
+    "executable": "whisper-cli",
+    "model_path": "/home/istiak/whisper_models/ggml-tiny.en.bin",
+    "model_dir": "/home/istiak/whisper_models",
+    "hotkey": "<ctrl>+<alt>+/"
+}
