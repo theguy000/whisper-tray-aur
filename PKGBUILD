@@ -15,12 +15,13 @@ depends=(
     'python-sounddevice'
     'python-numpy'
     'python-scipy'
-    'python-pyperclip'
     'python-pynput'
     'libappindicator-gtk3'
     'libnotify'
     'vulkan-icd-loader'
     'xclip'
+    'ggml-vulkan-git'
+    'sdl2-compat'
 )
 # Dependencies to BUILD the app (and whisper.cpp)
 makedepends=('cmake' 'git' 'vulkan-headers')
@@ -40,21 +41,15 @@ build() {
 
   cmake -B build -S . \
     -DCMAKE_BUILD_TYPE=Release \
-    -DWHISPER_BACKEND=Vulkan
+    -DWHISPER_SDL2=1 \
+    -DWHISPER_USE_SYSTEM_GGML=1
 
   cmake --build build
 }
 
 package() {
-    # --- THE FINAL FIX IS HERE ---
-    # The compiled binary is named 'main', not 'whisper-cli'.
-    # We will install the 'main' executable and rename it to 'whisper-tray-cli'.
     install -Dm755 "${srcdir}/whisper.cpp-1.6.0/build/bin/main" "${pkgdir}/usr/bin/${pkgname}-cli"
-
-    # The source directory will be 'whisper-tray-aur-main'
     cd "${srcdir}/whisper-tray-aur-main"
-
-    # Install your application script
     install -Dm755 "whisper-tray.py" "${pkgdir}/usr/bin/${pkgname}"
 
     # Install icons to a private directory
@@ -63,9 +58,6 @@ package() {
     install -Dm644 "icon-idle.svg" "${_icondir}/icon-idle.svg"
     install -Dm644 "icon-recording.svg" "${_icondir}/icon-recording.svg"
     install -Dm644 "icon-processing.svg" "${_icondir}/icon-processing.svg"
-
-    # Patch the script to use the correct paths
-    sed -i "s|ICON_DIR = SCRIPT_DIR|ICON_DIR = '/usr/share/${pkgname}/icons'|" "${pkgdir}/usr/bin/${pkgname}"
 
     # Create the launcher file
     _desktop_file="${srcdir}/${pkgname}.desktop"
@@ -82,6 +74,7 @@ EOF
     install -Dm644 "${_desktop_file}" "${pkgdir}/usr/share/applications/${pkgname}.desktop"
     # Install the icon for the launcher itself
     install -Dm644 "icon-idle.svg" "${pkgdir}/usr/share/icons/hicolor/scalable/apps/${pkgname}.svg"
-    # Install the license
+    # Install licenses
+    install -Dm644 "LICENSE" -t "${pkgdir}/usr/share/licenses/${pkgname}"
     install -Dm644 "${srcdir}/whisper.cpp-1.6.0/LICENSE" -t "${pkgdir}/usr/share/licenses/${pkgname}"
 }

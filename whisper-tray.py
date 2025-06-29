@@ -5,6 +5,7 @@ gi.require_version('Gtk', '3.0')
 gi.require_version('Notify', '0.7')
 
 from gi.repository import AppIndicator3 as appindicator, Gtk as gtk, GLib, Notify, GObject
+from pynput import keyboard
 from pynput.keyboard import GlobalHotKeys
 import json
 import sounddevice as sd
@@ -42,33 +43,78 @@ ICONS = {
     "processing": os.path.join(ICON_DIR, "icon-processing.svg"),
 }
 
-MODELS = {
-    "tiny.en": {"url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin", "disk": "75 MiB"},
-    "base.en": {"url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin", "disk": "142 MiB"},
-    "small.en": {"url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin", "disk": "466 MiB"},
-    "medium.en": {"url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.en.bin", "disk": "1.5 GiB"},
+LANGUAGES = {
+    "en": "english", "zh": "chinese", "de": "german", "es": "spanish",
+    "ru": "russian", "ko": "korean", "fr": "french", "ja": "japanese",
+    "pt": "portuguese", "tr": "turkish", "pl": "polish", "ca": "catalan",
+    "nl": "dutch", "ar": "arabic", "sv": "swedish", "it": "italian",
+    "id": "indonesian", "hi": "hindi", "fi": "finnish", "vi": "vietnamese",
+    "he": "hebrew", "uk": "ukrainian", "el": "greek", "ms": "malay",
+    "cs": "czech", "ro": "romanian", "da": "danish", "hu": "hungarian",
+    "ta": "tamil", "no": "norwegian", "th": "thai", "ur": "urdu",
+    "hr": "croatian", "bg": "bulgarian", "lt": "lithuanian", "la": "latin",
+    "mi": "maori", "ml": "malayalam", "cy": "welsh", "sk": "slovak",
+    "te": "telugu", "fa": "persian", "lv": "latvian", "bn": "bengali",
+    "sr": "serbian", "az": "azerbaijani", "sl": "slovenian", "kn": "kannada",
+    "et": "estonian", "mk": "macedonian", "br": "breton", "eu": "basque",
+    "is": "icelandic", "hy": "armenian", "ne": "nepali", "mn": "mongolian",
+    "bs": "bosnian", "kk": "kazakh", "sq": "albanian", "sw": "swahili",
+    "gl": "galician", "mr": "marathi", "pa": "punjabi", "si": "sinhala",
+    "km": "khmer", "sn": "shona", "yo": "yoruba", "so": "somali",
+    "af": "afrikaans", "oc": "occitan", "ka": "georgian", "be": "belarusian",
+    "tg": "tajik", "sd": "sindhi", "gu": "gujarati", "am": "amharic",
+    "yi": "yiddish", "lo": "lao", "uz": "uzbek", "fo": "faroese",
+    "ht": "haitian creole", "ps": "pashto", "tk": "turkmen", "nn": "nynorsk",
+    "mt": "maltese", "sa": "sanskrit", "lb": "luxembourgish", "my": "myanmar",
+    "bo": "tibetan", "tl": "tagalog", "mg": "malagasy", "as": "assamese",
+    "tt": "tatar", "haw": "hawaiian", "ln": "lingala", "ha": "hausa",
+    "ba": "bashkir", "jw": "javanese", "su": "sundanese",
 }
+
+MODELS = {
+    "tiny": {"url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin", "disk": "75 MiB", "ram": "~150 MB"},
+    "base": {"url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin", "disk": "142 MiB", "ram": "~250 MB"},
+    "small": {"url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin", "disk": "466 MiB", "ram": "~600 MB"},
+    "medium": {"url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin", "disk": "1.5 GiB", "ram": "~1.8 GB"},
+    "large-v1": {"url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v1.bin", "disk": "2.9 GiB", "ram": "~3.2 GB"},
+    "large-v2": {"url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/hhmain/ggml-large-v2.bin", "disk": "2.9 GiB", "ram": "~3.2 GB"},
+    "large-v3": {"url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin", "disk": "2.9 GiB", "ram": "~3.2 GB"},
+    "tiny.en": {"url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin", "disk": "75 MiB", "ram": "~150 MB"},
+    "base.en": {"url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin", "disk": "142 MiB", "ram": "~250 MB"},
+    "small.en": {"url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin", "disk": "466 MiB", "ram": "~600 MB"},
+    "medium.en": {"url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.en.bin", "disk": "1.5 GiB", "ram": "~1.8 GB"},
+}
+
+def save_config(config):
+    os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
+    with open(CONFIG_FILE, 'w') as f: json.dump(config, f, indent=4)
 
 def load_config():
     default_config_dir = os.path.dirname(CONFIG_FILE)
     default_model_dir = os.path.join(USER_HOME, ".local", "share", "whisper_models")
     os.makedirs(default_config_dir, exist_ok=True)
     os.makedirs(default_model_dir, exist_ok=True)
+    # Default hotkey is "meta+h" (normalized to "super" for Linux/Windows)
     default_config = {
-        "executable": os.path.join(SCRIPT_DIR, "whisper-tray-cli"),
+        "executable": "whisper-cli",
         "model_path": os.path.join(default_model_dir, "ggml-base.en.bin"),
         "model_dir": default_model_dir,
-        "hotkey": "<ctrl>+<alt>+h"
+        "hotkey": "ctrl+alt+h",
+        "language": "en"
     }
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, 'r') as f:
-            config = default_config.copy(); config.update(json.load(f))
+            config = default_config.copy()
+            try:
+                user_config = json.load(f)
+                config.update(user_config)
+            except json.JSONDecodeError:
+                logging.warning(f"Invalid JSON in {CONFIG_FILE}. Using default config and recreating the file.")
+                save_config(default_config)
             return config
-    return default_config
-
-def save_config(config):
-    os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
-    with open(CONFIG_FILE, 'w') as f: json.dump(config, f, indent=4)
+    else:
+        save_config(default_config)
+        return default_config
 
 class DownloadModelWindow(gtk.Window):
     def __init__(self, parent):
@@ -77,9 +123,11 @@ class DownloadModelWindow(gtk.Window):
         super().__init__(title="Download Model", modal=True, transient_for=self.parent_app.settings_win)
         self.set_border_width(10); self.set_position(gtk.WindowPosition.CENTER)
         vbox = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=6); self.add(vbox)
-        vbox.pack_start(gtk.Label(label="Model not found or failed to load."), False, False, 0)
         vbox.pack_start(gtk.Label(label="Please select a model to download:"), False, False, 0)
         self.model_combo = gtk.ComboBoxText(); vbox.pack_start(self.model_combo, False, False, 5)
+        ram_usage_label = gtk.Label(label="<i><small>RAM is used only during transcription.</small></i>")
+        ram_usage_label.set_use_markup(True)
+        vbox.pack_start(ram_usage_label, False, False, 0)
         self.progress_bar = gtk.ProgressBar(); vbox.pack_start(self.progress_bar, False, False, 5)
         hbox_buttons = gtk.Box(spacing=6)
         self.download_button = gtk.Button(label="Download"); self.download_button.connect("clicked", self.on_download_clicked)
@@ -92,7 +140,7 @@ class DownloadModelWindow(gtk.Window):
         if not available_models:
             vbox.pack_start(gtk.Label(label="All models already downloaded!"), False, False, 0); self.download_button.set_sensitive(False)
         else:
-            for name, data in available_models.items(): self.model_combo.append_text(f"{name} [Disk: {data['disk']}]")
+            for name, data in available_models.items(): self.model_combo.append_text(f"{name} [Disk: {data['disk']}, RAM: {data['ram']}]")
             self.model_combo.set_active(0)
 
     def on_download_clicked(self, widget):
@@ -142,11 +190,69 @@ class SettingsWindow(gtk.Window):
         self.populate_models()
         if self.parent.config.get("model_path") and os.path.exists(self.parent.config["model_path"]):
             self.model_combo.set_active_id(self.parent.config["model_path"])
+
+        self.lang_combo = gtk.ComboBoxText()
+        for lang_code, lang_name in sorted(LANGUAGES.items()):
+            self.lang_combo.append(lang_code, f"{lang_name.capitalize()} ({lang_code})")
+        self.lang_combo.set_active_id(self.parent.config.get("language", "en"))
+        vbox.pack_start(self._create_setting_row("Language:", self.lang_combo), False, False, 0)
+
         self.hotkey_entry = gtk.Entry(text=self.parent.config.get("hotkey", "<ctrl>+<alt>+h"))
-        vbox.pack_start(self._create_setting_row("Hotkey:", self.hotkey_entry), False, False, 0)
+        self.record_button = gtk.Button(label="Record")
+        self.record_button.connect("clicked", self.on_record_hotkey)
+        hotkey_box = gtk.Box(spacing=6)
+        hotkey_box.pack_start(self.hotkey_entry, True, True, 0)
+        hotkey_box.pack_start(self.record_button, False, False, 0)
+        vbox.pack_start(self._create_setting_row("Hotkey:", hotkey_box), False, False, 0)
         save_button = gtk.Button(label="Save and Close"); save_button.connect("clicked", self.on_save_clicked)
         hbox_buttons = gtk.Box(spacing=6, margin_top=10); hbox_buttons.pack_end(save_button, False, False, 0)
         vbox.pack_start(hbox_buttons, False, False, 0)
+
+    def on_record_hotkey(self, widget):
+        self.record_button.set_label("Recording...")
+        self.record_button.set_sensitive(False)
+        self.hotkey_entry.set_text("Press a key combination...")
+        self.hotkey_entry.set_sensitive(False)
+
+        self.pressed_keys = set()
+        self.listener = keyboard.Listener(on_press=self.on_key_press, on_release=self.on_key_release)
+        self.listener.start()
+
+    def on_key_press(self, key):
+        key_name = self.get_key_name(key)
+        if key_name:
+            self.pressed_keys.add(key_name)
+            self.update_hotkey_entry()
+
+    def on_key_release(self, key):
+        self.listener.stop()
+        self.record_button.set_label("Record")
+        self.record_button.set_sensitive(True)
+        self.hotkey_entry.set_sensitive(True)
+        # If only modifiers were pressed, clear the entry
+        if all(k.startswith('<') and k.endswith('>') for k in self.pressed_keys):
+            self.hotkey_entry.set_text(self.parent.config.get("hotkey", "<ctrl>+<alt>+h"))
+        return False
+
+    def get_key_name(self, key):
+        if isinstance(key, keyboard.Key):
+            name = key.name.replace('_r', '').replace('_l', '')
+            if name in ['ctrl', 'alt', 'shift', 'super', 'cmd']:
+                return f'<{name}>'
+            return name
+        elif hasattr(key, 'char') and key.char:
+            return key.char
+        return None
+
+    def update_hotkey_entry(self):
+        if not self.pressed_keys:
+            return
+
+        modifiers = sorted([k for k in self.pressed_keys if k.startswith('<') and k.endswith('>')])
+        regular_keys = sorted([k for k in self.pressed_keys if not (k.startswith('<') and k.endswith('>'))])
+
+        hotkey_str = "+".join(modifiers + regular_keys)
+        self.hotkey_entry.set_text(hotkey_str)
 
     def _create_setting_row(self, label_text, widget):
         box = gtk.Box(spacing=6); label = gtk.Label(label=label_text, xalign=0)
@@ -162,10 +268,42 @@ class SettingsWindow(gtk.Window):
                     model_path = os.path.join(model_dir, f); self.model_combo.append(model_path, f)
 
     def on_save_clicked(self, widget):
+        model_path = self.model_combo.get_active_id()
+        language = self.lang_combo.get_active_id()
+
+        if language and language != "en" and model_path and ".en.bin" in model_path:
+            dialog = gtk.MessageDialog(
+                transient_for=self, flags=0, message_type=gtk.MessageType.ERROR,
+                buttons=gtk.ButtonsType.OK, text="Configuration Error"
+            )
+            lang_name = LANGUAGES.get(language, language).capitalize()
+            model_name = os.path.basename(model_path)
+            dialog.format_secondary_text(
+                f"The selected language '{lang_name}' will not work with the English-only model '{model_name}'.\n\n"
+                "Please choose a multilingual model (e.g., 'base', 'small') or set the language to English."
+            )
+            dialog.run()
+            dialog.destroy()
+            return
+
         self.parent.config["executable"] = self.exec_entry.get_text()
         self.parent.config["model_dir"] = self.dir_entry.get_text()
-        if active_id := self.model_combo.get_active_id(): self.parent.config["model_path"] = active_id
+        if model_path: self.parent.config["model_path"] = model_path
+        if language: self.parent.config["language"] = language
         hotkey_text = self.hotkey_entry.get_text().lower()
+        if any(key in hotkey_text for key in ["meta", "super", "win"]):
+            dialog = gtk.MessageDialog(
+                transient_for=self, flags=0, message_type=gtk.MessageType.WARNING,
+                buttons=gtk.ButtonsType.OK, text="Hotkey Warning"
+            )
+            dialog.format_secondary_text(
+                "Using the 'Meta' (Super/Windows) key is not recommended as it often "
+                "conflicts with system shortcuts, especially on KDE Plasma.\n\n"
+                "If the hotkey does not work, please try a combination using Ctrl, Alt, and/or Shift."
+            )
+            dialog.run()
+            dialog.destroy()
+
         replacements = {"control": "ctrl", "super": "super", "meta": "super", "win": "super"}
         for old, new in replacements.items(): hotkey_text = hotkey_text.replace(old, new)
         parts = hotkey_text.split('+')
@@ -259,13 +397,14 @@ class TrayApp:
 
     def _transcribe_thread(self):
         try:
-            if not os.path.exists(model_path := self.config["model_path"]): raise FileNotFoundError(f"Model file not found: {model_path}")
-            executable = self.config.get("executable", "whisper-cli")
-            cmd = [executable, "-m", model_path, "-f", self.temp_wav_path, "-nt", "-otxt"]
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True, encoding='utf-8')
-            text_to_copy = result.stdout.strip()
-            subprocess.run(['xclip', '-selection', 'clipboard'], input=text_to_copy, text=True, check=True)
-            self._send_notification("Transcription Complete", "Text copied to clipboard.")
+                if not os.path.exists(model_path := self.config["model_path"]): raise FileNotFoundError(f"Model file not found: {model_path}")
+                executable = self.config.get("executable", "whisper-cli")
+                cmd = [executable, "-m", model_path, "-f", self.temp_wav_path, "-nt", "-otxt"]
+                if language := self.config.get("language"):
+                    cmd.extend(["-l", language])
+                result = subprocess.run(cmd, capture_output=True, text=True, check=True, encoding='utf-8')
+                subprocess.run(['xclip', '-selection', 'clipboard'], input=result.stdout.strip(), text=True)
+                self._send_notification("Transcription Complete", "Text copied to clipboard.")
         except FileNotFoundError:
             self._send_notification("Error", f"Executable '{self.config.get('executable')}' not found or model missing.", "dialog-error")
             GLib.idle_add(lambda: DownloadModelWindow(self).show_all())
