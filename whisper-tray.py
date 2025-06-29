@@ -38,7 +38,6 @@ if os.path.exists("/usr/share/whisper-tray/icons"):
 else:
     ICON_DIR = SCRIPT_DIR
 
-# Prefer /usr/share/whisper-tray/sounds/on.mp3 if it exists, else fallback to local
 SOUND_ON_PATH = "/usr/share/whisper-tray/sounds/on.mp3"
 if not os.path.exists(SOUND_ON_PATH):
     SOUND_ON_PATH = os.path.join(SCRIPT_DIR, "sounds", "on.mp3")
@@ -105,7 +104,6 @@ def load_config():
     default_model_dir = os.path.join(USER_HOME, ".local", "share", "whisper_models")
     os.makedirs(default_config_dir, exist_ok=True)
     os.makedirs(default_model_dir, exist_ok=True)
-    # Default hotkey is "meta+h" (normalized to "super" for Linux/Windows)
     default_config = {
         "executable": "whisper-tray-cli",
         "model_path": os.path.join(default_model_dir, "ggml-base.en.bin"),
@@ -189,15 +187,18 @@ class SettingsWindow(gtk.Window):
         self.parent = parent
         self.set_border_width(10); self.set_modal(True); self.set_position(gtk.WindowPosition.CENTER)
         vbox = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=10); self.add(vbox)
-        # --- Autostart Checkbox ---
         self.autostart_check = gtk.CheckButton(label="Start Whisper Tray at login")
         self.autostart_check.set_active(self._is_autostart_enabled())
         vbox.pack_start(self.autostart_check, False, False, 0)
 
-        # --- Notification Checkbox ---
         self.notifications_check = gtk.CheckButton(label="Enable Notifications")
         self.notifications_check.set_active(self.parent.config.get("enable_notifications", True))
         vbox.pack_start(self.notifications_check, False, False, 0)
+
+        # --- Sound Checkbox ---
+        self.sound_check = gtk.CheckButton(label="Enable Sound (play sound on start recording)")
+        self.sound_check.set_active(self.parent.config.get("enable_sound", True))
+        vbox.pack_start(self.sound_check, False, False, 0)
 
         self.exec_entry = gtk.Entry(text=self.parent.config.get("executable", "whisper-tray-cli"))
         vbox.pack_start(self._create_setting_row("Executable Name:", self.exec_entry), False, False, 0)
@@ -231,7 +232,6 @@ class SettingsWindow(gtk.Window):
         hotkey_box.pack_start(self.record_button, False, False, 0)
         vbox.pack_start(self._create_setting_row("Hotkey:", hotkey_box), False, False, 0)
 
-        # --- Output Mode Combo Box ---
         self.output_mode_combo = gtk.ComboBoxText()
         self.output_mode_combo.append("clipboard", "Copy to Clipboard")
         self.output_mode_combo.append("type", "Type Automatically (Ctrl+V)")
@@ -370,10 +370,10 @@ Comment=Start Whisper Tray at login
                 parts[i] = f'<{p}>'
         self.parent.config["hotkey"] = '+'.join(parts)
         self.parent.config["enable_notifications"] = self.notifications_check.get_active()
+        self.parent.config["enable_sound"] = self.sound_check.get_active()
         self.parent.config["output_mode"] = self.output_mode_combo.get_active_id()
         save_config(self.parent.config)
         self.parent._setup_hotkey()
-        # Handle autostart
         self._set_autostart(self.autostart_check.get_active())
         self.destroy(); self.parent.settings_win = None
 
@@ -398,7 +398,6 @@ class TrayApp:
         menu.show_all(); return menu
 
     def _send_notification(self, title, message, icon_name="whisper-tray"):
-        """Helper to send a desktop notification using libnotify."""
         if self.config.get("enable_notifications", True):
             notification = Notify.Notification.new(title, message, icon_name)
             notification.show()
@@ -444,8 +443,7 @@ class TrayApp:
     def start_recording(self):
         self._change_state("recording"); self.audio_frames = []
         self._send_notification("Recording", "Voice recording started. Speak now!", ICONS["recording"])
-        # Play starting sound (MP3 support via ffplay)
-        if os.path.exists(SOUNDS["on"]):
+        if self.config.get("enable_sound", True) and os.path.exists(SOUNDS["on"]):
             try:
                 subprocess.Popen(
                     ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", SOUNDS["on"]],
@@ -500,10 +498,8 @@ class TrayApp:
                 output_mode = self.config.get("output_mode", "clipboard")
 
                 if output_mode == "type":
-                    # First, copy to clipboard, then type
                     subprocess.run(['xclip', '-selection', 'clipboard'], input=transcribed_text, text=True)
                     GLib.idle_add(self._type_text, transcribed_text)
-                    # Removed notification for "Text typed automatically."
                 elif output_mode == "clipboard":
                     subprocess.run(['xclip', '-selection', 'clipboard'], input=transcribed_text, text=True)
                     self._send_notification("Transcription Complete", "Text copied to clipboard.")
@@ -515,7 +511,6 @@ class TrayApp:
                     subprocess.run(['xclip', '-selection', 'clipboard'], input=transcribed_text, text=True)
                     self._send_notification("Transcription Complete", "Text copied to clipboard.")
 
-                # --- Transcription History ---
                 try:
                     import datetime
                     os.makedirs(os.path.dirname(HISTORY_FILE), exist_ok=True)
@@ -542,7 +537,6 @@ class TrayApp:
             GLib.idle_add(self._change_state, "idle")
 
     def open_history(self, *args):
-        # Simple GTK window to show history
         win = gtk.Window(title="Transcription History")
         win.set_default_size(600, 400)
         vbox = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=6)
@@ -594,9 +588,6 @@ class TrayApp:
                 self._send_notification("Error", f"Failed to clear history: {e}", "dialog-error")
 
     def _type_text(self, text):
-        # Simulate Ctrl+V to paste the text
-        # This requires the text to be in the clipboard first
-        # Ensure xclip is used to put text into clipboard before calling this
         self.keyboard_controller.press(keyboard.Key.ctrl_l)
         self.keyboard_controller.press('v')
         self.keyboard_controller.release('v')
@@ -614,7 +605,6 @@ if __name__ == "__main__":
         gtk.main()
     except Exception as e:
         logging.error("Critical error during application startup: %s", e, exc_info=True)
-        # Fallback to show a GTK error dialog if possible
         try:
             dialog = gtk.MessageDialog(
                 transient_for=None,

@@ -1,6 +1,5 @@
 # Maintainer: TheGuy000 <istiakm30@gmail.com>
 
-# This is a stable release package
 pkgname='whisper-tray'
 pkgver=1.0
 pkgrel=1
@@ -9,7 +8,6 @@ arch=('x86_64' 'aarch64')
 url="https://github.com/theguy000/whisper-tray-aur"
 license=('MIT')
 
-# Dependencies to RUN the app
 depends=(
     'python-gobject'
     'python-sounddevice'
@@ -24,16 +22,13 @@ depends=(
     'sdl2-compat'
     'vulkan-icd-loader'
 )
-# Dependencies to BUILD the app (and whisper.cpp)
 makedepends=('cmake' 'git' 'vulkan-headers')
 
-# Point to a downloadable .tar.gz archive of your repository.
 source=(
     "$pkgname-$pkgver.tar.gz::https://github.com/theguy000/whisper-tray-aur/archive/refs/heads/main.tar.gz"
     "whisper.cpp-1.7.6.tar.gz::https://github.com/ggerganov/whisper.cpp/archive/refs/tags/v1.7.6.tar.gz"
 )
 
-# Remember to replace the first checksum with the real one you generate.
 sha256sums=('SKIP'
             'SKIP')
 
@@ -55,19 +50,16 @@ package() {
     cd "${srcdir}/whisper-tray-aur-main"
     install -Dm755 "whisper-tray.py" "${pkgdir}/usr/bin/${pkgname}"
 
-    # Install icons to a private directory
     _icondir="${pkgdir}/usr/share/${pkgname}/icons"
     install -d "${_icondir}"
     install -Dm644 "icon-idle.svg" "${_icondir}/icon-idle.svg"
     install -Dm644 "icon-recording.svg" "${_icondir}/icon-recording.svg"
     install -Dm644 "icon-processing.svg" "${_icondir}/icon-processing.svg"
 
-    # Install sounds
     _sounddir="${pkgdir}/usr/share/${pkgname}/sounds"
     install -d "${_sounddir}"
     install -Dm644 "sounds/on.mp3" "${_sounddir}/on.mp3"
 
-    # Create the launcher file
     _desktop_file="${srcdir}/${pkgname}.desktop"
     cat > "${_desktop_file}" <<EOF
 [Desktop Entry]
@@ -80,9 +72,7 @@ Terminal=false
 Type=Application
 EOF
     install -Dm644 "${_desktop_file}" "${pkgdir}/usr/share/applications/${pkgname}.desktop"
-    # Install the icon for the launcher itself
     install -Dm644 "icon-idle.svg" "${pkgdir}/usr/share/icons/hicolor/scalable/apps/${pkgname}.svg"
-    # Install licenses
     install -Dm644 "LICENSE" -t "${pkgdir}/usr/share/licenses/${pkgname}"
     install -Dm644 "${srcdir}/whisper.cpp-1.7.6/LICENSE" -t "${pkgdir}/usr/share/licenses/${pkgname}"
 }
