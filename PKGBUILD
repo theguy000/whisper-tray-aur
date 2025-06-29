@@ -62,6 +62,11 @@ package() {
     install -Dm644 "icon-recording.svg" "${_icondir}/icon-recording.svg"
     install -Dm644 "icon-processing.svg" "${_icondir}/icon-processing.svg"
 
+    # Install sounds
+    _sounddir="${pkgdir}/usr/share/${pkgname}/sounds"
+    install -d "${_sounddir}"
+    install -Dm644 "sounds/on.mp3" "${_sounddir}/on.mp3"
+
     # Create the launcher file
     _desktop_file="${srcdir}/${pkgname}.desktop"
     cat > "${_desktop_file}" <<EOF

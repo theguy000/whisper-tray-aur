@@ -38,6 +38,11 @@ if os.path.exists("/usr/share/whisper-tray/icons"):
 else:
     ICON_DIR = SCRIPT_DIR
 
+# Prefer /usr/share/whisper-tray/sounds/on.mp3 if it exists, else fallback to local
+SOUND_ON_PATH = "/usr/share/whisper-tray/sounds/on.mp3"
+if not os.path.exists(SOUND_ON_PATH):
+    SOUND_ON_PATH = os.path.join(SCRIPT_DIR, "sounds", "on.mp3")
+
 ICONS = {
     "idle": os.path.join(ICON_DIR, "icon-idle.svg"),
     "recording": os.path.join(ICON_DIR, "icon-recording.svg"),
@@ -45,7 +50,7 @@ ICONS = {
 }
 
 SOUNDS = {
-    "on": os.path.join(SCRIPT_DIR, "sounds", "on.mp3"),
+    "on": SOUND_ON_PATH,
 }
 
 LANGUAGES = {
