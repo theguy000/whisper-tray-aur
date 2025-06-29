@@ -3,8 +3,9 @@ import gi
 gi.require_version('AppIndicator3', '0.1')
 gi.require_version('Gtk', '3.0')
 gi.require_version('Notify', '0.7')
+gi.require_version('GdkPixbuf', '2.0')
 
-from gi.repository import AppIndicator3 as appindicator, Gtk as gtk, GLib, Notify
+from gi.repository import AppIndicator3 as appindicator, Gtk as gtk, GLib, Notify, GdkPixbuf
 from pynput import keyboard
 from pynput.keyboard import GlobalHotKeys
 import json
@@ -42,10 +43,11 @@ SOUND_ON_PATH = "/usr/share/whisper-tray/sounds/on.mp3"
 if not os.path.exists(SOUND_ON_PATH):
     SOUND_ON_PATH = os.path.join(SCRIPT_DIR, "sounds", "on.mp3")
 
+# Using icon names, not paths, for theme integration
 ICONS = {
-    "idle": os.path.join(ICON_DIR, "icon-idle.svg"),
-    "recording": os.path.join(ICON_DIR, "icon-recording.svg"),
-    "processing": os.path.join(ICON_DIR, "icon-processing.svg"),
+    "idle": "icon-idle",
+    "recording": "icon-recording",
+    "processing": "icon-processing",
 }
 
 SOUNDS = {
@@ -195,7 +197,6 @@ class SettingsWindow(gtk.Window):
         self.notifications_check.set_active(self.parent.config.get("enable_notifications", True))
         vbox.pack_start(self.notifications_check, False, False, 0)
 
-        # --- Sound Checkbox ---
         self.sound_check = gtk.CheckButton(label="Enable Sound (play sound on start recording)")
         self.sound_check.set_active(self.parent.config.get("enable_sound", True))
         vbox.pack_start(self.sound_check, False, False, 0)
@@ -215,12 +216,9 @@ class SettingsWindow(gtk.Window):
 
         self.lang_combo = gtk.ComboBoxText()
         self.lang_combo.remove_all()
-        # Add "auto" at the top
         self.lang_combo.append("auto", "Auto-detect (auto)")
-        # Add the rest sorted, skipping "auto"
         for lang_code, lang_name in sorted((k, v) for k, v in LANGUAGES.items() if k != "auto"):
             self.lang_combo.append(lang_code, f"{lang_name.capitalize()} ({lang_code})")
-        # Default to "auto" if not set
         self.lang_combo.set_active_id(self.parent.config.get("language", "auto"))
         vbox.pack_start(self._create_setting_row("Language:", self.lang_combo), False, False, 0)
 
@@ -264,7 +262,6 @@ class SettingsWindow(gtk.Window):
         self.record_button.set_label("Record")
         self.record_button.set_sensitive(True)
         self.hotkey_entry.set_sensitive(True)
-        # If only modifiers were pressed, clear the entry
         if all(k.startswith('<') and k.endswith('>') for k in self.pressed_keys):
             self.hotkey_entry.set_text(self.parent.config.get("hotkey", "<ctrl>+<alt>+h"))
         return False
@@ -382,11 +379,36 @@ class TrayApp:
         self.config = load_config(); self.audio_frames = []; self.samplerate = 16000
         self.thread = None; self.settings_win = None; self.hotkey_listener = None
         self.keyboard_controller = keyboard.Controller()
-        self.indicator = appindicator.Indicator.new("whisper-tray", ICONS["idle"], appindicator.IndicatorCategory.APPLICATION_STATUS)
+
+        self._setup_icon_theme()
+
+        self.indicator = appindicator.Indicator.new(
+            "whisper-tray",
+            ICONS["idle"],
+            appindicator.IndicatorCategory.APPLICATION_STATUS
+        )
         self.indicator.set_status(appindicator.IndicatorStatus.ACTIVE)
         Notify.init("Whisper Tray")
         self.menu = self._build_menu(); self.indicator.set_menu(self.menu)
         self._setup_hotkey(); self._change_state("idle")
+
+    def _setup_icon_theme(self):
+        """Adds the application's icon directory to the GTK icon search path."""
+        icon_theme = gtk.IconTheme.get_default()
+        if os.path.isdir(ICON_DIR):
+            icon_theme.append_search_path(ICON_DIR)
+            logging.info(f"Added icon search path: {ICON_DIR}")
+        else:
+            logging.warning(f"Icon directory not found, custom icons may not appear: {ICON_DIR}")
+
+    def _create_pixbuf_from_icon_name(self, icon_name, size):
+        """Loads an icon from the theme and returns a GdkPixbuf.Pixbuf."""
+        try:
+            icon_theme = gtk.IconTheme.get_default()
+            return icon_theme.load_icon(icon_name, size, 0)
+        except GLib.Error as e:
+            logging.error(f"Could not load icon '{icon_name}' into Pixbuf: {e}")
+            return None
 
     def _build_menu(self):
         menu = gtk.Menu()
@@ -397,10 +419,20 @@ class TrayApp:
         quit_item = gtk.MenuItem.new_with_label("Quit"); quit_item.connect("activate", self.quit_app); menu.append(quit_item)
         menu.show_all(); return menu
 
-    def _send_notification(self, title, message, icon_name="whisper-tray"):
-        if self.config.get("enable_notifications", True):
-            notification = Notify.Notification.new(title, message, icon_name)
-            notification.show()
+    def _send_notification(self, title, message, icon_name=ICONS["idle"]):
+        if not self.config.get("enable_notifications", True):
+            print(f"[{title}] {message}")
+            return
+
+        notification = Notify.Notification.new(title, message)
+        pixbuf = self._create_pixbuf_from_icon_name(icon_name, 48)
+
+        if pixbuf:
+            notification.set_image_from_pixbuf(pixbuf)
+        else:
+            notification.set_category("im.information")
+
+        notification.show()
         print(f"[{title}] {message}")
 
     def _change_state(self, new_state):
@@ -411,13 +443,11 @@ class TrayApp:
             "processing": {"icon": ICONS["processing"], "label": "Processing...",  "sensitive": False}
         }
         config = state_map.get(self.state, state_map["idle"])
-        icon_path = config["icon"]
-        if not os.path.exists(icon_path):
-            logging.error(f"Tray icon file not found: {icon_path}")
+        icon_name = config["icon"]
         try:
-            GLib.idle_add(lambda: self.indicator.set_icon_full(icon_path, self.state.capitalize()))
+            GLib.idle_add(lambda: self.indicator.set_icon_full(icon_name, self.state.capitalize()))
         except Exception as e:
-            logging.error(f"Failed to set tray icon: {icon_path} ({e})")
+            logging.error(f"Failed to set tray icon by name: {icon_name} ({e})")
         GLib.idle_add(lambda: self.record_item.set_label(config["label"]))
         GLib.idle_add(lambda: self.record_item.set_sensitive(config["sensitive"]))
 
@@ -605,6 +635,7 @@ if __name__ == "__main__":
         gtk.main()
     except Exception as e:
         logging.error("Critical error during application startup: %s", e, exc_info=True)
+        # Note: The Gtk.MessageDialog may not work if Gtk itself fails to initialize.
         try:
             dialog = gtk.MessageDialog(
                 transient_for=None,
