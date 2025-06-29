@@ -4,7 +4,7 @@ gi.require_version('AppIndicator3', '0.1')
 gi.require_version('Gtk', '3.0')
 gi.require_version('Notify', '0.7')
 
-from gi.repository import AppIndicator3 as appindicator, Gtk as gtk, GLib, Notify, GObject
+from gi.repository import AppIndicator3 as appindicator, Gtk as gtk, GLib, Notify
 from pynput import keyboard
 from pynput.keyboard import GlobalHotKeys
 import json
@@ -22,6 +22,8 @@ import sys
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 USER_HOME = os.path.expanduser("~")
 CONFIG_FILE = os.path.join(USER_HOME, ".config", "whisper-tray", "config.json")
+HISTORY_FILE = os.path.join(os.path.dirname(CONFIG_FILE), "history.jsonl")
+AUTOSTART_FILE = os.path.join(USER_HOME, ".config", "autostart", "whisper-tray.desktop")
 
 LOG_FILE = os.path.join(os.path.dirname(CONFIG_FILE), "whisper-tray.log")
 os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
@@ -31,7 +33,6 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
-# Search for icons in the installed path, otherwise use local
 if os.path.exists("/usr/share/whisper-tray/icons"):
     ICON_DIR = "/usr/share/whisper-tray/icons"
 else:
@@ -43,7 +44,12 @@ ICONS = {
     "processing": os.path.join(ICON_DIR, "icon-processing.svg"),
 }
 
+SOUNDS = {
+    "on": os.path.join(SCRIPT_DIR, "sounds", "on.mp3"),
+}
+
 LANGUAGES = {
+    "auto": "auto-detect",
     "en": "english", "zh": "chinese", "de": "german", "es": "spanish",
     "ru": "russian", "ko": "korean", "fr": "french", "ja": "japanese",
     "pt": "portuguese", "tr": "turkish", "pl": "polish", "ca": "catalan",
@@ -96,7 +102,7 @@ def load_config():
     os.makedirs(default_model_dir, exist_ok=True)
     # Default hotkey is "meta+h" (normalized to "super" for Linux/Windows)
     default_config = {
-        "executable": "whisper-cli",
+        "executable": "whisper-tray-cli",
         "model_path": os.path.join(default_model_dir, "ggml-base.en.bin"),
         "model_dir": default_model_dir,
         "hotkey": "ctrl+alt+h",
@@ -178,7 +184,17 @@ class SettingsWindow(gtk.Window):
         self.parent = parent
         self.set_border_width(10); self.set_modal(True); self.set_position(gtk.WindowPosition.CENTER)
         vbox = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=10); self.add(vbox)
-        self.exec_entry = gtk.Entry(text=self.parent.config.get("executable", "whisper-cli"))
+        # --- Autostart Checkbox ---
+        self.autostart_check = gtk.CheckButton(label="Start Whisper Tray at login")
+        self.autostart_check.set_active(self._is_autostart_enabled())
+        vbox.pack_start(self.autostart_check, False, False, 0)
+
+        # --- Notification Checkbox ---
+        self.notifications_check = gtk.CheckButton(label="Enable Notifications")
+        self.notifications_check.set_active(self.parent.config.get("enable_notifications", True))
+        vbox.pack_start(self.notifications_check, False, False, 0)
+
+        self.exec_entry = gtk.Entry(text=self.parent.config.get("executable", "whisper-tray-cli"))
         vbox.pack_start(self._create_setting_row("Executable Name:", self.exec_entry), False, False, 0)
         self.dir_entry = gtk.Entry(text=self.parent.config.get("model_dir"))
         self.dir_entry.connect("changed", lambda w: self.populate_models())
@@ -192,9 +208,14 @@ class SettingsWindow(gtk.Window):
             self.model_combo.set_active_id(self.parent.config["model_path"])
 
         self.lang_combo = gtk.ComboBoxText()
-        for lang_code, lang_name in sorted(LANGUAGES.items()):
+        self.lang_combo.remove_all()
+        # Add "auto" at the top
+        self.lang_combo.append("auto", "Auto-detect (auto)")
+        # Add the rest sorted, skipping "auto"
+        for lang_code, lang_name in sorted((k, v) for k, v in LANGUAGES.items() if k != "auto"):
             self.lang_combo.append(lang_code, f"{lang_name.capitalize()} ({lang_code})")
-        self.lang_combo.set_active_id(self.parent.config.get("language", "en"))
+        # Default to "auto" if not set
+        self.lang_combo.set_active_id(self.parent.config.get("language", "auto"))
         vbox.pack_start(self._create_setting_row("Language:", self.lang_combo), False, False, 0)
 
         self.hotkey_entry = gtk.Entry(text=self.parent.config.get("hotkey", "<ctrl>+<alt>+h"))
@@ -204,6 +225,15 @@ class SettingsWindow(gtk.Window):
         hotkey_box.pack_start(self.hotkey_entry, True, True, 0)
         hotkey_box.pack_start(self.record_button, False, False, 0)
         vbox.pack_start(self._create_setting_row("Hotkey:", hotkey_box), False, False, 0)
+
+        # --- Output Mode Combo Box ---
+        self.output_mode_combo = gtk.ComboBoxText()
+        self.output_mode_combo.append("clipboard", "Copy to Clipboard")
+        self.output_mode_combo.append("type", "Type Automatically (Ctrl+V)")
+        self.output_mode_combo.append("both", "Both (Clipboard & Type)")
+        self.output_mode_combo.set_active_id(self.parent.config.get("output_mode", "clipboard"))
+        vbox.pack_start(self._create_setting_row("Output Mode:", self.output_mode_combo), False, False, 0)
+
         save_button = gtk.Button(label="Save and Close"); save_button.connect("clicked", self.on_save_clicked)
         hbox_buttons = gtk.Box(spacing=6, margin_top=10); hbox_buttons.pack_end(save_button, False, False, 0)
         vbox.pack_start(hbox_buttons, False, False, 0)
@@ -267,6 +297,28 @@ class SettingsWindow(gtk.Window):
                 if f.endswith(".bin"):
                     model_path = os.path.join(model_dir, f); self.model_combo.append(model_path, f)
 
+    def _is_autostart_enabled(self):
+        return os.path.exists(AUTOSTART_FILE)
+
+    def _set_autostart(self, enable):
+        os.makedirs(os.path.dirname(AUTOSTART_FILE), exist_ok=True)
+        if enable:
+            exec_path = sys.argv[0]
+            desktop_entry = f"""[Desktop Entry]
+Type=Application
+Exec={exec_path}
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+Name=Whisper Tray
+Comment=Start Whisper Tray at login
+"""
+            with open(AUTOSTART_FILE, "w") as f:
+                f.write(desktop_entry)
+        else:
+            if os.path.exists(AUTOSTART_FILE):
+                os.remove(AUTOSTART_FILE)
+
     def on_save_clicked(self, widget):
         model_path = self.model_combo.get_active_id()
         language = self.lang_combo.get_active_id()
@@ -312,14 +364,19 @@ class SettingsWindow(gtk.Window):
             if p in ["ctrl", "alt", "shift", "super"] and not (p.startswith('<') and p.endswith('>')):
                 parts[i] = f'<{p}>'
         self.parent.config["hotkey"] = '+'.join(parts)
+        self.parent.config["enable_notifications"] = self.notifications_check.get_active()
+        self.parent.config["output_mode"] = self.output_mode_combo.get_active_id()
         save_config(self.parent.config)
         self.parent._setup_hotkey()
+        # Handle autostart
+        self._set_autostart(self.autostart_check.get_active())
         self.destroy(); self.parent.settings_win = None
 
 class TrayApp:
     def __init__(self):
         self.config = load_config(); self.audio_frames = []; self.samplerate = 16000
         self.thread = None; self.settings_win = None; self.hotkey_listener = None
+        self.keyboard_controller = keyboard.Controller()
         self.indicator = appindicator.Indicator.new("whisper-tray", ICONS["idle"], appindicator.IndicatorCategory.APPLICATION_STATUS)
         self.indicator.set_status(appindicator.IndicatorStatus.ACTIVE)
         Notify.init("Whisper Tray")
@@ -329,14 +386,17 @@ class TrayApp:
     def _build_menu(self):
         menu = gtk.Menu()
         self.record_item = gtk.MenuItem.new_with_label("Record"); self.record_item.connect("activate", self.toggle_recording); menu.append(self.record_item)
+        history_item = gtk.MenuItem.new_with_label("History"); history_item.connect("activate", self.open_history); menu.append(history_item)
+        clear_history_item = gtk.MenuItem.new_with_label("Clear History"); clear_history_item.connect("activate", self.clear_history); menu.append(clear_history_item)
         settings_item = gtk.MenuItem.new_with_label("Settings"); settings_item.connect("activate", self.open_settings); menu.append(settings_item)
         quit_item = gtk.MenuItem.new_with_label("Quit"); quit_item.connect("activate", self.quit_app); menu.append(quit_item)
         menu.show_all(); return menu
 
     def _send_notification(self, title, message, icon_name="whisper-tray"):
         """Helper to send a desktop notification using libnotify."""
-        notification = Notify.Notification.new(title, message, icon_name)
-        notification.show()
+        if self.config.get("enable_notifications", True):
+            notification = Notify.Notification.new(title, message, icon_name)
+            notification.show()
         print(f"[{title}] {message}")
 
     def _change_state(self, new_state):
@@ -347,7 +407,13 @@ class TrayApp:
             "processing": {"icon": ICONS["processing"], "label": "Processing...",  "sensitive": False}
         }
         config = state_map.get(self.state, state_map["idle"])
-        GLib.idle_add(lambda: self.indicator.set_icon_full(config["icon"], self.state.capitalize()))
+        icon_path = config["icon"]
+        if not os.path.exists(icon_path):
+            logging.error(f"Tray icon file not found: {icon_path}")
+        try:
+            GLib.idle_add(lambda: self.indicator.set_icon_full(icon_path, self.state.capitalize()))
+        except Exception as e:
+            logging.error(f"Failed to set tray icon: {icon_path} ({e})")
         GLib.idle_add(lambda: self.record_item.set_label(config["label"]))
         GLib.idle_add(lambda: self.record_item.set_sensitive(config["sensitive"]))
 
@@ -372,6 +438,26 @@ class TrayApp:
 
     def start_recording(self):
         self._change_state("recording"); self.audio_frames = []
+        self._send_notification("Recording", "Voice recording started. Speak now!", ICONS["recording"])
+        # Play starting sound (MP3 support via ffplay)
+        if os.path.exists(SOUNDS["on"]):
+            try:
+                subprocess.Popen(
+                    ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", SOUNDS["on"]],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+            except FileNotFoundError:
+                logging.warning("ffplay not found. Cannot play recording start sound.")
+                GLib.idle_add(
+                    lambda: self._send_notification(
+                        "Sound Playback Unavailable",
+                        "Could not play start sound. Please install 'ffmpeg' (ffplay) for MP3 support.",
+                        "dialog-warning"
+                    )
+                )
+            except Exception as e:
+                logging.error(f"Error playing sound with ffplay: {e}")
         self.thread = threading.Thread(target=self._record_audio_thread, daemon=True); self.thread.start()
 
     def _record_audio_thread(self):
@@ -398,13 +484,45 @@ class TrayApp:
     def _transcribe_thread(self):
         try:
                 if not os.path.exists(model_path := self.config["model_path"]): raise FileNotFoundError(f"Model file not found: {model_path}")
-                executable = self.config.get("executable", "whisper-cli")
+                executable = self.config.get("executable", "whisper-tray-cli")
                 cmd = [executable, "-m", model_path, "-f", self.temp_wav_path, "-nt", "-otxt"]
-                if language := self.config.get("language"):
+                language = self.config.get("language")
+                if language and language != "auto":
                     cmd.extend(["-l", language])
                 result = subprocess.run(cmd, capture_output=True, text=True, check=True, encoding='utf-8')
-                subprocess.run(['xclip', '-selection', 'clipboard'], input=result.stdout.strip(), text=True)
-                self._send_notification("Transcription Complete", "Text copied to clipboard.")
+                transcribed_text = result.stdout.strip()
+
+                output_mode = self.config.get("output_mode", "clipboard")
+
+                if output_mode == "type":
+                    # First, copy to clipboard, then type
+                    subprocess.run(['xclip', '-selection', 'clipboard'], input=transcribed_text, text=True)
+                    GLib.idle_add(self._type_text, transcribed_text)
+                    # Removed notification for "Text typed automatically."
+                elif output_mode == "clipboard":
+                    subprocess.run(['xclip', '-selection', 'clipboard'], input=transcribed_text, text=True)
+                    self._send_notification("Transcription Complete", "Text copied to clipboard.")
+                elif output_mode == "both":
+                    subprocess.run(['xclip', '-selection', 'clipboard'], input=transcribed_text, text=True)
+                    GLib.idle_add(self._type_text, transcribed_text)
+                    self._send_notification("Transcription Complete", "Text copied to clipboard and typed.")
+                else: # Default to clipboard if unknown mode
+                    subprocess.run(['xclip', '-selection', 'clipboard'], input=transcribed_text, text=True)
+                    self._send_notification("Transcription Complete", "Text copied to clipboard.")
+
+                # --- Transcription History ---
+                try:
+                    import datetime
+                    os.makedirs(os.path.dirname(HISTORY_FILE), exist_ok=True)
+                    with open(HISTORY_FILE, "a") as hf:
+                        entry = {
+                            "timestamp": datetime.datetime.now().isoformat(),
+                            "text": transcribed_text,
+                            "language": language,
+                        }
+                        hf.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                except Exception as hist_e:
+                    logging.error(f"Failed to write transcription history: {hist_e}")
         except FileNotFoundError:
             self._send_notification("Error", f"Executable '{self.config.get('executable')}' not found or model missing.", "dialog-error")
             GLib.idle_add(lambda: DownloadModelWindow(self).show_all())
@@ -417,6 +535,67 @@ class TrayApp:
         finally:
             if hasattr(self, 'temp_wav_path') and os.path.exists(self.temp_wav_path): os.remove(self.temp_wav_path)
             GLib.idle_add(self._change_state, "idle")
+
+    def open_history(self, *args):
+        # Simple GTK window to show history
+        win = gtk.Window(title="Transcription History")
+        win.set_default_size(600, 400)
+        vbox = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=6)
+        win.add(vbox)
+        sw = gtk.ScrolledWindow()
+        vbox.pack_start(sw, True, True, 0)
+        textview = gtk.TextView()
+        textview.set_editable(False)
+        sw.add(textview)
+        buf = textview.get_buffer()
+        try:
+            if os.path.exists(HISTORY_FILE):
+                with open(HISTORY_FILE, "r") as hf:
+                    lines = hf.readlines()[-100:]  # Show last 100 entries
+                entries = [json.loads(line) for line in lines]
+                history_text = ""
+                for entry in entries:
+                    ts = entry.get("timestamp", "")
+                    lang = entry.get("language", "")
+                    txt = entry.get("text", "")
+                    history_text += f"[{ts}] ({lang})\n{txt}\n{'-'*40}\n"
+                buf.set_text(history_text)
+            else:
+                buf.set_text("No transcription history found.")
+        except Exception as e:
+            buf.set_text(f"Failed to load history: {e}")
+        win.show_all()
+
+    def clear_history(self, *args):
+        dialog = gtk.MessageDialog(
+            transient_for=None,
+            flags=gtk.DialogFlags.MODAL | gtk.DialogFlags.DESTROY_WITH_PARENT,
+            message_type=gtk.MessageType.QUESTION,
+            buttons=gtk.ButtonsType.YES_NO,
+            text="Clear Transcription History"
+        )
+        dialog.format_secondary_text("Are you sure you want to clear all transcription history? This action cannot be undone.")
+        response = dialog.run()
+        dialog.destroy()
+
+        if response == gtk.ResponseType.YES:
+            try:
+                if os.path.exists(HISTORY_FILE):
+                    os.remove(HISTORY_FILE)
+                    self._send_notification("History Cleared", "Transcription history has been cleared.")
+                else:
+                    self._send_notification("History", "No history file to clear.", "dialog-information")
+            except Exception as e:
+                self._send_notification("Error", f"Failed to clear history: {e}", "dialog-error")
+
+    def _type_text(self, text):
+        # Simulate Ctrl+V to paste the text
+        # This requires the text to be in the clipboard first
+        # Ensure xclip is used to put text into clipboard before calling this
+        self.keyboard_controller.press(keyboard.Key.ctrl_l)
+        self.keyboard_controller.press('v')
+        self.keyboard_controller.release('v')
+        self.keyboard_controller.release(keyboard.Key.ctrl_l)
 
     def quit_app(self, *args):
         if self.hotkey_listener: self.hotkey_listener.stop()

@@ -18,10 +18,11 @@ depends=(
     'python-pynput'
     'libappindicator-gtk3'
     'libnotify'
-    'vulkan-icd-loader'
     'xclip'
+    'ffmpeg'
     'ggml-vulkan-git'
     'sdl2-compat'
+    'vulkan-icd-loader'
 )
 # Dependencies to BUILD the app (and whisper.cpp)
 makedepends=('cmake' 'git' 'vulkan-headers')
@@ -29,7 +30,7 @@ makedepends=('cmake' 'git' 'vulkan-headers')
 # Point to a downloadable .tar.gz archive of your repository.
 source=(
     "$pkgname-$pkgver.tar.gz::https://github.com/theguy000/whisper-tray-aur/archive/refs/heads/main.tar.gz"
-    "whisper.cpp-1.6.0.tar.gz::https://github.com/ggerganov/whisper.cpp/archive/refs/tags/v1.6.0.tar.gz"
+    "whisper.cpp-1.7.6.tar.gz::https://github.com/ggerganov/whisper.cpp/archive/refs/tags/v1.7.6.tar.gz"
 )
 
 # Remember to replace the first checksum with the real one you generate.
@@ -37,18 +38,20 @@ sha256sums=('SKIP'
             'SKIP')
 
 build() {
-  cd "whisper.cpp-1.6.0"
+  cd "whisper.cpp-1.7.6"
 
   cmake -B build -S . \
+    -DCMAKE_INSTALL_PREFIX=/usr \
     -DCMAKE_BUILD_TYPE=Release \
-    -DWHISPER_SDL2=1 \
+    -DWHISPER_SDL2=ON \
     -DWHISPER_USE_SYSTEM_GGML=1
 
   cmake --build build
 }
 
 package() {
-    install -Dm755 "${srcdir}/whisper.cpp-1.6.0/build/bin/main" "${pkgdir}/usr/bin/${pkgname}-cli"
+    DESTDIR="${pkgdir}" cmake --install "${srcdir}/whisper.cpp-1.7.6/build"
+    install -Dm755 "${srcdir}/whisper.cpp-1.7.6/build/bin/main" "${pkgdir}/usr/bin/${pkgname}-cli"
     cd "${srcdir}/whisper-tray-aur-main"
     install -Dm755 "whisper-tray.py" "${pkgdir}/usr/bin/${pkgname}"
 
@@ -76,5 +79,5 @@ EOF
     install -Dm644 "icon-idle.svg" "${pkgdir}/usr/share/icons/hicolor/scalable/apps/${pkgname}.svg"
     # Install licenses
     install -Dm644 "LICENSE" -t "${pkgdir}/usr/share/licenses/${pkgname}"
-    install -Dm644 "${srcdir}/whisper.cpp-1.6.0/LICENSE" -t "${pkgdir}/usr/share/licenses/${pkgname}"
+    install -Dm644 "${srcdir}/whisper.cpp-1.7.6/LICENSE" -t "${pkgdir}/usr/share/licenses/${pkgname}"
 }
