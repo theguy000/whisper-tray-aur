@@ -29,11 +29,16 @@ source=(
     "whisper.cpp-1.7.6.tar.gz::https://github.com/ggerganov/whisper.cpp/archive/refs/tags/v1.7.6.tar.gz"
 )
 
-sha256sums=('SKIP'
-            'SKIP')
+sha256sums=('cca565a59afc607e06bc5f06c5dc64dd587401f885d29f204159ca57fadac65e'
+            '166140e9a6d8a36f787a2bd77f8f44dd64874f12dd8359ff7c1f4f9acb86202e')
 
 build() {
-  cd "whisper.cpp-1.7.6"
+  # The main tar.gz will extract to whisper-tray-aur-main, cd into that first
+  # The README.md is a local file, sourced into srcdir directly.
+  # The PKGBUILD expects whisper.cpp to be in srcdir, so we might need to adjust paths if
+  # the main tarball structure is different than expected.
+  # For now, assuming the build commands work as originally intended relative to srcdir.
+  cd "${srcdir}/whisper.cpp-1.7.6"
 
   cmake -B build -S . \
     -DCMAKE_INSTALL_PREFIX=/usr \
